@@ -1,23 +1,111 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import Tesseract from 'tesseract.js';
 
-// Use the bundled worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+// Set up the PDF.js worker — use the CDN with correct version and .min.js (not .mjs)
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 /**
- * Extract all text from a PDF file
+ * Render a PDF page to a canvas and return it as an image data URL
+ */
+async function renderPageToImage(page, scale = 2.0) {
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d');
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return canvas.toDataURL('image/png');
+}
+
+/**
+ * Run OCR on an image data URL using Tesseract.js
+ */
+async function ocrImage(imageDataUrl, onProgress) {
+    const result = await Tesseract.recognize(imageDataUrl, 'eng', {
+        logger: (m) => {
+            if (m.status === 'recognizing text' && onProgress) {
+                onProgress(Math.round(m.progress * 100));
+            }
+        },
+    });
+    return result.data.text;
+}
+
+/**
+ * Extract all text from a PDF file.
+ * First tries native text extraction via pdf.js.
+ * If a page has little/no text, falls back to OCR via Tesseract.js.
+ *
  * @param {File} file - The PDF file object
+ * @param {Function} onProgress - Optional callback: (message: string) => void
  * @returns {Promise<string>} - The extracted text
  */
-export async function extractTextFromPDF(file) {
+export async function extractTextFromPDF(file, onProgress) {
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const textParts = [];
 
-    for (let i = 1; i <= pdf.numPages; i++) {
+    let pdf;
+    try {
+        pdf = await pdfjsLib.getDocument({
+            data: new Uint8Array(arrayBuffer),
+            useSystemFonts: true,
+        }).promise;
+    } catch (err) {
+        console.error('pdf.js failed to load document, trying with fallback:', err);
+        // Retry without worker (inline fallback)
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+        pdf = await pdfjsLib.getDocument({
+            data: new Uint8Array(arrayBuffer),
+            isEvalSupported: false,
+        }).promise;
+    }
+
+    const textParts = [];
+    const totalPages = pdf.numPages;
+
+    for (let i = 1; i <= totalPages; i++) {
+        if (onProgress) onProgress(`Reading page ${i} of ${totalPages}...`);
+
         const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items.map(item => item.str).join(' ');
-        textParts.push(pageText);
+
+        // Try native text extraction first
+        let pageText = '';
+        try {
+            const content = await page.getTextContent();
+            pageText = content.items
+                .map(item => {
+                    // Preserve spacing: if item has EOL flag, add newline
+                    let str = item.str;
+                    if (item.hasEOL) str += '\n';
+                    return str;
+                })
+                .join(' ')
+                .replace(/  +/g, ' ')
+                .trim();
+        } catch (err) {
+            console.warn(`Text extraction failed for page ${i}:`, err);
+        }
+
+        // If native extraction got very little text, use OCR
+        const meaningfulText = pageText.replace(/\s+/g, '').length;
+        if (meaningfulText < 30) {
+            if (onProgress) onProgress(`OCR scanning page ${i} of ${totalPages}...`);
+            try {
+                const imageUrl = await renderPageToImage(page);
+                const ocrText = await ocrImage(imageUrl, (pct) => {
+                    if (onProgress) onProgress(`OCR page ${i}/${totalPages}: ${pct}%`);
+                });
+                if (ocrText && ocrText.trim().length > meaningfulText) {
+                    pageText = ocrText.trim();
+                }
+            } catch (err) {
+                console.warn(`OCR failed for page ${i}:`, err);
+            }
+        }
+
+        if (pageText.trim()) {
+            textParts.push(pageText.trim());
+        }
     }
 
     return textParts.join('\n\n');

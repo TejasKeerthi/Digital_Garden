@@ -54,7 +54,18 @@ export default function GardenPage({ gardenItems, setGardenItems, onNavigate }) 
         setUploadProgress('Reading PDF...');
 
         try {
-            const text = await extractTextFromPDF(pendingFile);
+            const text = await extractTextFromPDF(pendingFile, (msg) => {
+                setUploadProgress(msg);
+            });
+
+            if (!text || text.trim().length < 10) {
+                alert('Could not extract any text from this PDF. The file might be empty or corrupted.');
+                setUploading(false);
+                setUploadProgress('');
+                setPendingFile(null);
+                return;
+            }
+
             setUploadProgress('Processing content...');
 
             // Small delay so user sees the processing step
