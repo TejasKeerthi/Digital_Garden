@@ -1,5 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import GardenPage from './GardenPage';
+import StudyPage from './StudyPage';
 
 /* ==========================================
    CROSS-SUBJECT DATA & AI ENGINE
@@ -228,7 +230,7 @@ const stagger = {
 };
 
 /* ---------- HOME ---------- */
-function HomePage({ onNavigate }) {
+function HomePage({ onNavigate, gardenCount }) {
     return (
         <motion.div {...fadeUp}>
             {/* Hero */}
@@ -239,15 +241,15 @@ function HomePage({ onNavigate }) {
                         <span className="gradient-text">Connect Everything.</span>
                     </h1>
                     <p>
-                        SynapseLearn uses AI to connect your subjects together. See how math explains physics,
-                        how biology mirrors economics, and how patterns repeat across everything you study.
+                        Upload your study PDFs, tag them by subject, and let SynapseLearn break them down into
+                        easy-to-learn notes, flashcards, and cross-subject connections.
                     </p>
                     <div className="hero-actions">
-                        <button className="btn btn-primary" onClick={() => onNavigate('explore')}>
-                            🚀 Start Exploring
+                        <button className="btn btn-primary" onClick={() => onNavigate('garden')}>
+                            🌱 Upload PDFs to Garden
                         </button>
-                        <button className="btn btn-secondary" onClick={() => onNavigate('learn')}>
-                            🧠 Jump to Learning
+                        <button className="btn btn-secondary" onClick={() => onNavigate('study')}>
+                            🧠 Start Studying
                         </button>
                     </div>
                 </motion.div>
@@ -256,10 +258,10 @@ function HomePage({ onNavigate }) {
             {/* Stats */}
             <motion.div className="stats-row" variants={stagger} initial="initial" animate="animate">
                 {[
+                    { icon: '🌱', value: gardenCount || '0', label: 'PDFs in Garden', bg: 'rgba(34,211,167,0.12)' },
                     { icon: '📚', value: '8', label: 'Subjects', bg: 'rgba(99,102,241,0.12)' },
                     { icon: '🔗', value: '7', label: 'Cross-Connections', bg: 'rgba(168,85,247,0.12)' },
-                    { icon: '⚡', value: '40+', label: 'Topic Explanations', bg: 'rgba(236,72,153,0.12)' },
-                    { icon: '🤖', value: 'AI', label: 'Powered Insights', bg: 'rgba(34,211,167,0.12)' },
+                    { icon: '🤖', value: 'AI', label: 'Powered Insights', bg: 'rgba(236,72,153,0.12)' },
                 ].map((s, i) => (
                     <motion.div className="stat-card" key={i} variants={fadeUp}>
                         <div className="stat-icon" style={{ background: s.bg }}>{s.icon}</div>
@@ -271,32 +273,26 @@ function HomePage({ onNavigate }) {
                 ))}
             </motion.div>
 
-            {/* Quick Topics */}
-            <h3 className="section-title">🔥 Trending Cross-Subject Topics</h3>
+            {/* How It Works */}
+            <h3 className="section-title">🚀 How It Works</h3>
             <motion.div className="topics-grid" variants={stagger} initial="initial" animate="animate">
-                {QUICK_TOPICS.map((t, i) => {
-                    const subjectData = t.subjects.map(sid => SUBJECTS.find(s => s.id === sid));
-                    return (
-                        <motion.div
-                            className="topic-card"
-                            key={i}
-                            variants={fadeUp}
-                            style={{ '--accent': subjectData[0]?.color }}
-                            onClick={() => onNavigate('learn')}
-                        >
-                            <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '0 4px 4px 0', background: subjectData[0]?.color }} />
-                            <div className="topic-title">{t.title}</div>
-                            <div className="topic-subjects">
-                                {subjectData.map(s => (
-                                    <span key={s.id} className="topic-tag" style={{ color: s.color, borderColor: s.color + '40', background: s.color + '10' }}>
-                                        {s.icon} {s.name}
-                                    </span>
-                                ))}
-                            </div>
-                            <div className="topic-desc">{t.desc}</div>
-                        </motion.div>
-                    );
-                })}
+                {[
+                    { title: '1. Upload Your PDFs', desc: 'Drop your study materials — textbooks, notes, papers — into your garden', icon: '📄', color: '#4f8cff' },
+                    { title: '2. Tag by Subject', desc: 'Organize files by subject — Math, Physics, Biology, or create your own', icon: '🏷️', color: '#a855f7' },
+                    { title: '3. Study Smart', desc: 'Get AI-broken-down notes, flashcards, and key concepts from your content', icon: '🧠', color: '#22d3a7' },
+                    { title: '4. See Connections', desc: 'Discover how concepts across subjects link together', icon: '🔗', color: '#ec4899' },
+                ].map((t, i) => (
+                    <motion.div
+                        className="topic-card"
+                        key={i}
+                        variants={fadeUp}
+                        onClick={() => i === 0 ? onNavigate('garden') : i === 2 ? onNavigate('study') : onNavigate('explore')}
+                    >
+                        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderRadius: '0 4px 4px 0', background: t.color }} />
+                        <div className="topic-title">{t.icon} {t.title}</div>
+                        <div className="topic-desc">{t.desc}</div>
+                    </motion.div>
+                ))}
             </motion.div>
         </motion.div>
     );
@@ -556,6 +552,15 @@ function ProfilePage() {
 export default function App() {
     const [page, setPage] = useState('home');
     const [selectedSubjects, setSelectedSubjects] = useState([]);
+    const [studySubject, setStudySubject] = useState(null);
+
+    // Load garden items from localStorage
+    const [gardenItems, setGardenItems] = useState(() => {
+        try {
+            const saved = localStorage.getItem('gardenItems');
+            return saved ? JSON.parse(saved) : [];
+        } catch { return []; }
+    });
 
     const toggleSubject = (id) => {
         setSelectedSubjects(prev => {
@@ -565,10 +570,21 @@ export default function App() {
         });
     };
 
+    const handleNavigate = (targetPage, subject) => {
+        if (targetPage === 'study' && subject) {
+            setStudySubject(subject);
+        } else if (targetPage === 'study') {
+            setStudySubject(null);
+        }
+        setPage(targetPage);
+    };
+
     const navItems = [
         { id: 'home', icon: '🏠', label: 'Home' },
+        { id: 'garden', icon: '🌱', label: 'My Garden' },
+        { id: 'study', icon: '🧠', label: 'Study' },
         { id: 'explore', icon: '🌍', label: 'Explore' },
-        { id: 'learn', icon: '🧠', label: 'Learn' },
+        { id: 'learn', icon: '🔗', label: 'Connections' },
         { id: 'profile', icon: '👤', label: 'Profile' },
     ];
 
@@ -594,7 +610,7 @@ export default function App() {
                         <div
                             key={item.id}
                             className={`nav-item ${page === item.id ? 'active' : ''}`}
-                            onClick={() => setPage(item.id)}
+                            onClick={() => handleNavigate(item.id)}
                         >
                             <span className="nav-icon">{item.icon}</span>
                             <span className="nav-label">{item.label}</span>
@@ -603,7 +619,7 @@ export default function App() {
                 </div>
 
                 <div className="sidebar-footer">
-                    <div className="user-info" onClick={() => setPage('profile')}>
+                    <div className="user-info" onClick={() => handleNavigate('profile')}>
                         <div className="avatar">T</div>
                         <div>
                             <div className="user-name">Tejas</div>
@@ -616,13 +632,29 @@ export default function App() {
             {/* Main Content */}
             <main className="main-content">
                 <AnimatePresence mode="wait">
-                    {page === 'home' && <HomePage key="home" onNavigate={setPage} />}
+                    {page === 'home' && <HomePage key="home" onNavigate={handleNavigate} gardenCount={gardenItems.length} />}
+                    {page === 'garden' && (
+                        <GardenPage
+                            key="garden"
+                            gardenItems={gardenItems}
+                            setGardenItems={setGardenItems}
+                            onNavigate={handleNavigate}
+                        />
+                    )}
+                    {page === 'study' && (
+                        <StudyPage
+                            key="study"
+                            gardenItems={gardenItems}
+                            studySubject={studySubject}
+                            onNavigate={handleNavigate}
+                        />
+                    )}
                     {page === 'explore' && (
                         <ExplorePage
                             key="explore"
                             selectedSubjects={selectedSubjects}
                             onToggleSubject={toggleSubject}
-                            onNavigate={setPage}
+                            onNavigate={handleNavigate}
                         />
                     )}
                     {page === 'learn' && (
@@ -630,7 +662,7 @@ export default function App() {
                             key="learn"
                             selectedSubjects={selectedSubjects}
                             onToggleSubject={toggleSubject}
-                            onNavigate={setPage}
+                            onNavigate={handleNavigate}
                         />
                     )}
                     {page === 'profile' && <ProfilePage key="profile" />}
